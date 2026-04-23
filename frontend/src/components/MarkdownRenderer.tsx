@@ -4,6 +4,7 @@
  * unordered/ordered lists, blockquotes, horizontal rules, links, tables.
  */
 import React, { useMemo } from 'react';
+import DOMPurify from 'dompurify';
 
 function escapeHtml(str: string): string {
     return str
@@ -11,6 +12,23 @@ function escapeHtml(str: string): string {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+function isSafeUrl(raw: string): boolean {
+    const u = raw.trim().replace(/[\t\n\r]/g, '').toLowerCase();
+    if (u.startsWith('//')) return false;                    // protocol-relative
+    if (u.startsWith('http://') || u.startsWith('https://')) return true;
+    if (u.startsWith('mailto:')) return true;
+    if (u.startsWith('/') || u.startsWith('#')) return true; // same-origin absolute or fragment
+    // Scheme-less (relative) URL: reject if any colon appears before first slash/?/#
+    const colon = u.indexOf(':');
+    if (colon === -1) return true;
+    const terminator = Math.min(
+        ...[u.indexOf('/'), u.indexOf('?'), u.indexOf('#')]
+            .filter(i => i !== -1)
+            .concat([Infinity])
+    );
+    return colon > terminator;
 }
 
 function renderInline(text: string): string {
@@ -27,19 +45,24 @@ function renderInline(text: string): string {
         .replace(/`([^`]+)`/g, '<code style="background:var(--bg-secondary);padding:1px 4px;border-radius:3px;font-family:monospace;font-size:0.9em">$1</code>')
         // Images
         .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
+            if (!isSafeUrl(url)) return escapeHtml(match);
             let finalUrl = url;
-            if (finalUrl.startsWith('/api/agents/')) {
+            const isAgentImage = finalUrl.startsWith('/api/agents/');
+            if (isAgentImage) {
                 const token = localStorage.getItem('token');
                 if (token && !finalUrl.includes('token=')) {
                     finalUrl += (finalUrl.includes('?') ? '&' : '?') + `token=${token}`;
                 }
+                // /api/agents/* image — no outbound wrapper, no referrer (prevents JWT leakage via Referer)
+                return `<img src="${escapeHtml(finalUrl)}" alt="${escapeHtml(alt)}" referrerpolicy="no-referrer" style="max-width:100%;max-height:400px;border-radius:4px;margin:8px 0;object-fit:contain" />`;
             }
-            return `<a href="${finalUrl}" target="_blank"><img src="${finalUrl}" alt="${alt}" style="max-width:100%;max-height:400px;border-radius:4px;margin:8px 0;object-fit:contain;cursor:pointer" /></a>`;
+            return `<a href="${escapeHtml(finalUrl)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(finalUrl)}" alt="${escapeHtml(alt)}" style="max-width:100%;max-height:400px;border-radius:4px;margin:8px 0;object-fit:contain;cursor:pointer" /></a>`;
         })
         // Links
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
             // Avoid matching images that snuck through or weird nested stuff
             if (match.startsWith('!')) return match;
+            if (!isSafeUrl(url)) return escapeHtml(match);
             let finalUrl = url;
             if (finalUrl.startsWith('/api/agents/')) {
                 const token = localStorage.getItem('token');
@@ -47,7 +70,7 @@ function renderInline(text: string): string {
                     finalUrl += (finalUrl.includes('?') ? '&' : '?') + `token=${token}`;
                 }
             }
-            return `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-primary)">${text}</a>`;
+            return `<a href="${escapeHtml(finalUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-primary)">${escapeHtml(text)}</a>`;
         })
         // Strikethrough
         .replace(/~~(.*?)~~/g, '<del>$1</del>');
@@ -196,7 +219,10 @@ interface MarkdownRendererProps {
 }
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, style, className }: MarkdownRendererProps) {
-    const html = useMemo(() => markdownToHtml(content), [content]);
+    const html = useMemo(
+        () => DOMPurify.sanitize(markdownToHtml(content), { USE_PROFILES: { html: true } }),
+        [content]
+    );
     return (
         <div
             className={className}

@@ -32,7 +32,7 @@ async def list_users(
     )
 
     target_tenant_id = current_user.tenant_id
-    if current_user.role in ("platform_admin", "org_admin") and tenant_id:
+    if current_user.role == "platform_admin" and tenant_id:
         target_tenant_id = tenant_id
     if target_tenant_id:
         query = query.where(User.tenant_id == target_tenant_id)
@@ -58,6 +58,16 @@ async def admin_update_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Authorization: non-platform-admin callers must be in the same tenant and
+    # must not be able to edit equal-or-higher-role users (except themselves).
+    ROLE_RANK = {"user": 0, "member": 0, "agent_admin": 0, "org_admin": 1, "platform_admin": 2}
+
+    if current_user.role != "platform_admin":
+        if user.tenant_id != current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        if ROLE_RANK.get(user.role, 0) >= ROLE_RANK.get(current_user.role, 0) and user.id != current_user.id:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     update_data = data.model_dump(exclude_unset=True)
 

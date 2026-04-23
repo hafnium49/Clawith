@@ -7,9 +7,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.permissions import check_agent_access
 from app.core.security import get_current_user
+from app.database import get_db
 from app.models.user import User
 from app.config import get_settings
+from app.services import text_extractor
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -32,120 +37,59 @@ MIME_MAP = {
 }
 
 
-def extract_text(file_path: Path, extension: str) -> str:
-    """Extract text content from a file."""
-    if extension in TEXT_EXTENSIONS:
-        try:
-            return file_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            return file_path.read_text(encoding="gbk", errors="replace")
-
-    if extension == ".pdf":
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["python3", "-c", f"""
-import sys
-try:
-    import PyPDF2
-    reader = PyPDF2.PdfReader('{file_path}')
-    text = '\\n'.join(page.extract_text() or '' for page in reader.pages)
-    print(text[:8000])
-except ImportError:
-    # Fallback: use pdftotext if available
-    import subprocess as sp
-    r = sp.run(['pdftotext', '{file_path}', '-'], capture_output=True, text=True)
-    print(r.stdout[:8000] if r.returncode == 0 else '[无法解析PDF]')
-"""],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout.strip() or "[PDF内容提取失败]"
-        except Exception as e:
-            return f"[PDF解析错误: {e}]"
-
-    if extension == ".docx":
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["python3", "-c", f"""
-try:
-    from docx import Document
-    doc = Document('{file_path}')
-    text = '\\n'.join(p.text for p in doc.paragraphs)
-    print(text[:8000])
-except ImportError:
-    print('[需要安装 python-docx 库]')
-"""],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout.strip() or "[DOCX内容提取失败]"
-        except Exception as e:
-            return f"[DOCX解析错误: {e}]"
-
-    if extension in (".xlsx", ".xls"):
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["python3", "-c", f"""
-try:
-    import openpyxl
-    wb = openpyxl.load_workbook('{file_path}', read_only=True)
-    lines = []
-    for ws in wb.worksheets[:3]:
-        lines.append(f'## Sheet: {{ws.title}}')
-        for row in ws.iter_rows(max_row=50, values_only=True):
-            lines.append('\\t'.join(str(c) if c is not None else '' for c in row))
-    print('\\n'.join(lines)[:8000])
-except ImportError:
-    print('[需要安装 openpyxl 库]')
-"""],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout.strip() or "[Excel内容提取失败]"
-        except Exception as e:
-            return f"[Excel解析错误: {e}]"
-
-    return f"[不支持的文件格式: {extension}]"
-
-
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    agent_id: str = Form(""),
+    agent_id: uuid.UUID = Form(...),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Upload a file for chat context. Saves to agent workspace/uploads/ and returns extracted text."""
+    # Authorization: ensure caller can access this agent
+    await check_agent_access(db, current_user, agent_id)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")
 
-    ext = os.path.splitext(file.filename)[1].lower()
+    # Sanitize filename: strip directory components, reject traversal tricks
+    raw = file.filename or ""
+    safe_name = os.path.basename(raw).replace("/", "_").replace("\\", "_")
+    if "\x00" in safe_name or safe_name in ("", ".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    # Truncate to 200 bytes to stay under typical FS limits
+    if len(safe_name.encode("utf-8")) > 200:
+        stem, ext = os.path.splitext(safe_name)
+        safe_name = stem[:200 - len(ext)].encode("utf-8", "ignore").decode("utf-8", "ignore") + ext
+
+    ext = os.path.splitext(safe_name)[1].lower()
 
     content = await file.read()
 
-    # Determine save directory
-    workspace_path = ""
-    if agent_id:
-        # Save to agent's workspace/uploads/
-        uploads_dir = WORKSPACE_ROOT / agent_id / "workspace" / "uploads"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
-        save_path = uploads_dir / file.filename
-        # Avoid overwriting: add suffix if file exists
-        if save_path.exists():
-            stem = save_path.stem
-            suffix = save_path.suffix
-            counter = 1
-            while save_path.exists():
-                save_path = uploads_dir / f"{stem}_{counter}{suffix}"
-                counter += 1
-        save_path.write_bytes(content)
-        workspace_path = f"workspace/uploads/{save_path.name}"
-    else:
-        # Fallback: save to /tmp (legacy behavior)
-        fallback_dir = Path("/tmp/clawith_uploads")
-        fallback_dir.mkdir(exist_ok=True)
-        file_id = str(uuid.uuid4())[:8]
-        save_path = fallback_dir / f"{file_id}_{file.filename}"
-        save_path.write_bytes(content)
+    # Resolve and enforce containment BEFORE creating directories (prevents symlink TOCTOU)
+    uploads_dir = (WORKSPACE_ROOT / str(agent_id) / "workspace" / "uploads").resolve()
+    save_path_candidate = (uploads_dir / safe_name).resolve()
+    if not str(save_path_candidate).startswith(str(uploads_dir) + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collision handling with O_EXCL (avoids exists()+write race)
+    stem, suffix = os.path.splitext(safe_name)
+    counter = 0
+    save_path: Path
+    while True:
+        candidate = uploads_dir / (safe_name if counter == 0 else f"{stem}_{counter}{suffix}")
+        try:
+            fd = os.open(str(candidate), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+            save_path = candidate
+            break
+        except FileExistsError:
+            counter += 1
+            if counter > 1000:
+                raise HTTPException(status_code=500, detail="Upload failed")
+
+    workspace_path = f"workspace/uploads/{save_path.name}"
 
     # Extract text (only for known formats)
     is_image = ext in IMAGE_EXTENSIONS
@@ -157,9 +101,20 @@ async def upload_file(
         mime = MIME_MAP.get(ext, "image/png")
         b64 = base64.b64encode(content).decode("ascii")
         image_data_url = f"data:{mime};base64,{b64}"
-        extracted = f"[图片文件: {file.filename}，需要视觉模型分析]"
-    elif ext in EXTRACTABLE:
-        extracted = extract_text(save_path, ext)
+        extracted = f"[图片文件: {safe_name}，需要视觉模型分析]"
+    elif ext in TEXT_EXTENSIONS:
+        # Plain-text formats: decode in-memory without touching disk tools
+        try:
+            extracted = content.decode("utf-8", errors="replace")
+        except Exception:
+            extracted = content.decode("gbk", errors="replace")
+    elif ext in OFFICE_EXTENSIONS:
+        # Office formats: delegate to the shared safe extractor (bytes + filename)
+        extracted_opt = text_extractor.extract_text(content, safe_name)
+        if extracted_opt is None:
+            extracted = f"[文件已保存，格式 {ext} 暂不支持文本提取，Agent 可通过 read_document 工具读取]"
+        else:
+            extracted = extracted_opt
     else:
         extracted = f"[文件已保存，格式 {ext} 暂不支持文本提取，Agent 可通过 read_document 工具读取]"
 
@@ -168,7 +123,7 @@ async def upload_file(
         extracted = extracted[:6000] + "\n\n...[内容已截断，共 " + str(len(extracted)) + " 字]"
 
     return {
-        "filename": file.filename,
+        "filename": safe_name,
         "saved_filename": save_path.name,
         "size": len(content),
         "extracted_text": extracted,
