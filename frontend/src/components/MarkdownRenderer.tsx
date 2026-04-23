@@ -220,7 +220,13 @@ interface MarkdownRendererProps {
 
 export const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, style, className }: MarkdownRendererProps) {
     const html = useMemo(
-        () => DOMPurify.sanitize(markdownToHtml(content), { USE_PROFILES: { html: true } }),
+        () => DOMPurify.sanitize(markdownToHtml(content), {
+            USE_PROFILES: { html: true },
+            // DOMPurify strips `target` and `referrerpolicy` by default; we need both:
+            // - `target="_blank"` on external links / external image wrappers (paired with rel="noopener noreferrer")
+            // - `referrerpolicy="no-referrer"` on /api/agents/* images to prevent JWT leakage via Referer
+            ADD_ATTR: ['target', 'referrerpolicy'],
+        }),
         [content]
     );
     return (
