@@ -238,6 +238,8 @@ async def test_list_users_cross_tenant_filter_denied_for_org_admin(monkeypatch):
     assert len(result) == 1
     assert result[0].tenant_id == str(own_tenant)
     # The rendered SQL should contain the caller's tenant_id, not the attacker's.
+    # SQLAlchemy's literal_binds renders UUIDs as 32-char hex (no hyphens), so
+    # compare on hex form.
     rendered = str(captured["statement"].compile(compile_kwargs={"literal_binds": True}))
-    assert str(own_tenant) in rendered
-    assert str(other_tenant) not in rendered
+    assert own_tenant.hex in rendered
+    assert other_tenant.hex not in rendered
