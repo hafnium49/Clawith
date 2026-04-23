@@ -73,9 +73,9 @@ Scope: existing codebase on `main` at commit `4474393`. Focus: high-confidence, 
 
 This section addresses the question: "can these findings be accepted without fixing, given our deployment assumptions?" It supplements — it does not replace — the per-vuln recommendations above. An adjacent proposal ([Proposal_Hardening_Clawith_with_OpenShell_to_NemoClaw_Equivalence](Proposal_Hardening_Clawith_with_OpenShell_to_NemoClaw_Equivalence/Proposal_Hardening_Clawith_with_OpenShell_to_NemoClaw_Equivalence.md)) proposes wrapping Clawith in an OpenShell sandbox for agent-runtime hardening; that proposal explicitly leaves Clawith's Python source unmodified and therefore does not address any of the four findings, all of which live in the control plane or frontend.
 
-### 1. Attacker model — why "trusted users" isn't a mitigation
+### 1. Attacker model — why "our users won't attack us" isn't a valid risk-acceptance argument
 
-Every finding requires authentication only. Vulns 1, 2, and 3 fire for *any* authenticated user; Vuln 4 requires the `org_admin` role. The realistic attacker set is therefore broader than "employees who decide to attack":
+Every finding requires authentication only. Vulns 1, 2, and 3 fire for *any* authenticated user; Vuln 4 requires the `org_admin` role. A common argument for deferring these fixes is "the users of this deployment are employees we trust, so exploitation is unrealistic." That argument reduces to "no account in our user population is ever compromised during the deployment's lifetime" — which is a strictly stronger claim than "our employees are trustworthy," and is not supported by industry base rates. The realistic attacker set is therefore broader than "employees who decide to attack":
 
 - **Compromised accounts** — credentials phished by adversary-in-the-middle kits (e.g. Evilginx-style) that proxy the full MFA handshake and exfiltrate the post-MFA session, or scraped by info-stealer malware on a user's personal device. The employee is entirely trustworthy; their session is now the attacker's.
 - **Compromised endpoints** — malware on a laptop reads the browser's auth token from `localStorage` or the cookie jar.
