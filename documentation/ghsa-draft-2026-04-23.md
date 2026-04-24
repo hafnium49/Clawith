@@ -128,9 +128,43 @@ After organizational clearance, and once the four patches are exported:
 git format-patch -4 feat/security-fixes-2026-04-23 -o /tmp/clawith-patches/
 
 # File the advisory (draft visible only to you and maintainers)
-gh api -X POST /repos/dataelement/Clawith/security-advisories \
-    --input /tmp/advisory.json
+gh api -X POST /repos/dataelement/Clawith/security-advisories/reports \
+    --input tmp/clawith-ghsa-report.json
 ```
+
+---
+
+## Filing record
+
+Filed: **2026-04-24**.
+
+| Field | Value |
+|---|---|
+| GHSA ID | `GHSA-p92f-5j96-qvc2` |
+| URL (private — visible to reporter + repo maintainers) | https://github.com/dataelement/Clawith/security/advisories/GHSA-p92f-5j96-qvc2 |
+| API endpoint used | `POST /repos/dataelement/Clawith/security-advisories/reports` |
+| Reporter (GitHub login) | `hafnium49` |
+| State | `triage` — awaiting maintainer acceptance |
+| Severity | **Critical** (GitHub-computed, score 9.1) |
+| Advisory CVSS vector | `CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H` (F4's vector) |
+| CWEs recorded | CWE-22, CWE-78, CWE-79, CWE-639 |
+| Submission accepted | `false` (maintainers have not yet triaged) |
+| Private fork created | Not yet (auto-created on maintainer acceptance) |
+| Patches attached | None yet — will push to the temporary private fork after acceptance |
+
+### Body submitted
+
+Description and field layout taken from `tmp/clawith-ghsa-report.json` (git-ignored; local-only copy). No employer or corporate-affiliation strings present. Requested timeline: **14 days** from acknowledgment.
+
+### API quirks observed
+
+- The endpoint rejected sending both `severity` and `cvss_vector_string`. Dropping `severity` (CVSS vector is strictly more informative) resolved the 422 and the severity field was then derived by GitHub from the vector.
+- `vulnerable_functions` arrays were silently stripped on submission (returned empty in the response even though the request sent `["extract_text"]`, `["upload_file"]`, `["markdownToHtml"]`, `["admin_update_user"]`). Function names remain discoverable via the description text which cites the fully-qualified file-and-symbol paths. Worth retrying via the advisory-update endpoint once maintainers accept, in case the restriction only applies to the initial report.
+- GitHub's CVSS-3.1 calculator produced score 9.1 from the submitted vector rather than the 9.9 our own calculation gave. The severity (Critical) is unchanged.
+
+### Next step
+
+Monitor the advisory URL for maintainer response. If no acknowledgment within 14 days, escalate via GitHub Security Lab (`securitylab@github.com`) as fallback CNA. On acceptance, GitHub will create the temporary private fork; push the four patches there from the fix branch and request review.
 
 `/tmp/advisory.json` should be a JSON object with `summary`, `description` (full markdown above), `severity: "high"`, `cwe_ids`, `vulnerabilities`, and `credits` fields. Produce with `jq` from this markdown or hand-assemble.
 
