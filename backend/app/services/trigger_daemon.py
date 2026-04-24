@@ -11,11 +11,9 @@ Every 15 seconds:
 """
 
 import asyncio
-import ipaddress
 import json as _json
 import uuid
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
 
 from croniter import croniter
 from loguru import logger
@@ -24,6 +22,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models.trigger import AgentTrigger
 from app.models.agent import Agent
+from app.services.security.ssrf import is_private_url_async
 
 TICK_INTERVAL = 15  # seconds
 DEDUP_WINDOW = 30   # seconds — same agent won't be invoked twice within this window
@@ -46,36 +45,6 @@ def _cleanup_stale_invoke_cache():
 # Webhook rate limiter: token -> list of timestamps
 _webhook_hits: dict[str, list[float]] = {}
 WEBHOOK_RATE_LIMIT = 5   # max hits per minute per token
-
-
-# ── SSRF Protection ─────────────────────────────────────────────────
-
-def _is_private_url(url: str) -> bool:
-    """Block private/internal URLs to prevent SSRF attacks."""
-    try:
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
-            return True
-
-        # Block obvious private hostnames
-        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-            return True
-
-        # Try to resolve hostname and check IP
-        import socket
-        try:
-            infos = socket.getaddrinfo(hostname, None)
-            for info in infos:
-                ip = ipaddress.ip_address(info[4][0])
-                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                    return True
-        except (socket.gaierror, ValueError):
-            return True  # Cannot resolve = block
-
-        return False
-    except Exception:
-        return True  # Block on any parsing error
 
 
 # ── Trigger Evaluation ──────────────────────────────────────────────
@@ -173,7 +142,7 @@ async def _poll_check(trigger: AgentTrigger) -> bool:
         return False
 
     # SSRF protection: block private/internal URLs
-    if _is_private_url(url):
+    if await is_private_url_async(url):
         logger.warning(f"Poll blocked for trigger {trigger.name}: private/internal URL '{url}'")
         return False
 
@@ -323,7 +292,7 @@ async def _check_new_agent_messages(trigger: AgentTrigger) -> bool:
 
                 # Look up user by display name or username within tenant
                 from sqlalchemy import or_
-                from app.models.user import User, Identity
+                from app.models.user import Identity
                 safe_user_name = from_user_name.replace("%", "").replace("_", r"\_")
                 query = (
                     select(User)
@@ -387,7 +356,6 @@ async def _invoke_agent_for_triggers(agent_id: uuid.UUID, triggers: list[AgentTr
     Creates a Reflection Session and calls the LLM.
     """
     from app.services.llm import call_llm
-    from app.services.agent_context import build_agent_context
     from app.models.llm import LLMModel
     from app.models.audit import ChatMessage
     from app.models.chat_session import ChatSession
@@ -715,7 +683,7 @@ async def _tick():
 
     async with async_session() as db:
         result = await db.execute(
-            select(AgentTrigger).where(AgentTrigger.is_enabled == True)
+            select(AgentTrigger).where(AgentTrigger.is_enabled)
         )
         all_triggers = result.scalars().all()
 
@@ -798,8 +766,6 @@ async def wake_agent_with_context(agent_id: uuid.UUID, message_context: str, *, 
         skip_dedup: If True, bypass the dedup window check.
         a2a_session_id: Optional A2A chat session ID to mirror the reply into.
     """
-    import time as _time
-
     now = datetime.now(timezone.utc)
 
     if from_agent_id:

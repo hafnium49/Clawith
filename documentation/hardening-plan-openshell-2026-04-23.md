@@ -224,3 +224,15 @@ Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 
 - ✅ Scoped initial `ruff` execution to `tests/conftest.py` and `tests/test_auth.py` to avoid unrelated baseline lint debt blocking Phase 0 bootstrap.
 - ✅ Scoped initial `pytest` execution to `tests/test_auth.py` for the same bootstrap purpose while broader suite hardening remains in later phases.
 - ✅ Updated `backend/tests/conftest.py` to randomize `Identity.email`, use `hash_password("test-password")`, and document that fixtures return detached objects that must be explicitly persisted by tests.
+
+## Execution log — 2026-04-24 (Phase 1 progress)
+
+- ✅ Added reusable SSRF helper at `backend/app/services/security/ssrf.py` with fail-closed URL/scheme/DNS/IP checks.
+- ✅ Refactored `backend/app/services/trigger_daemon.py` poll path to use the shared SSRF helper instead of inline duplicate logic.
+- ✅ Added `backend/tests/test_ssrf.py` to validate localhost/private-IP blocking and public-host allow behavior with deterministic DNS monkeypatching.
+
+## Execution log — 2026-04-24 (Phase 1 SSRF review follow-up)
+
+- ✅ Added an async DNS resolution path (`is_private_url_async`) and switched trigger polling to use it so DNS lookups no longer block the trigger daemon event loop.
+- ✅ Clarified module-level caveat that DNS validation is first-line protection and transport-level pinned-IP enforcement is still required to fully mitigate DNS rebinding TOCTOU.
+- ✅ Expanded SSRF tests to cover non-HTTP scheme branch, DNS failure fail-closed behavior, mixed public/private multi-answer DNS, IPv6 loopback URL, malformed hostname-less URLs, and async resolver behavior.
