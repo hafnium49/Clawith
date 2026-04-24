@@ -211,3 +211,9 @@ Alerts: shields down > 30 min (timer failed), policy-compile errors, sandbox lif
 | NemoClaw reference (read-only) | HEAD @ d9aced49 | local clone |
 
 Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 golden tests, drain sandboxes, rebuild, rehydrate.
+
+## Execution log — 2026-04-24
+
+- ✅ Phase 0 item: added PR workflow at `.github/workflows/pr.yaml` to run `ruff` and `pytest` with `STUB=1` on pull requests.
+- ✅ Phase 0 item: added shared test fixtures at `backend/tests/conftest.py` for tenant/identity/user/agent objects.
+- ⚠️ Phase 0 item (base-image digest pin) remains blocked in this environment because the private OpenShell registry credentials are not available to resolve and verify the digest.
