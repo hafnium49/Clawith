@@ -211,3 +211,16 @@ Alerts: shields down > 30 min (timer failed), policy-compile errors, sandbox lif
 | NemoClaw reference (read-only) | HEAD @ d9aced49 | local clone |
 
 Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 golden tests, drain sandboxes, rebuild, rehydrate.
+
+## Execution log — 2026-04-24
+
+- ✅ Phase 0 item: added PR workflow at `.github/workflows/pr.yaml` to run `ruff` and `pytest` on pull requests.
+- ✅ Phase 0 item: added shared test fixtures at `backend/tests/conftest.py` for tenant/identity/user/agent objects.
+- ⚠️ Phase 0 item (base-image digest pin) remains blocked in this environment because the private OpenShell registry credentials are not available to resolve and verify the digest.
+
+## Execution log — 2026-04-24 (follow-up review fixes)
+
+- ✅ Updated `.github/workflows/pr.yaml` to remove ineffective `STUB=1`, add `permissions: contents: read`, add `concurrency` cancellation, and enable pip cache.
+- ✅ Scoped initial `ruff` execution to `tests/conftest.py` and `tests/test_auth.py` to avoid unrelated baseline lint debt blocking Phase 0 bootstrap.
+- ✅ Scoped initial `pytest` execution to `tests/test_auth.py` for the same bootstrap purpose while broader suite hardening remains in later phases.
+- ✅ Updated `backend/tests/conftest.py` to randomize `Identity.email`, use `hash_password("test-password")`, and document that fixtures return detached objects that must be explicitly persisted by tests.
