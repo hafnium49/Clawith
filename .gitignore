@@ -32,3 +32,6 @@ _agents/
 # Internal docs
 docs/
 .agents/rules/deploy.md
+
+# Local Claude Code project instructions (never commit — contains private attribution rules)
+CLAUDE.md
