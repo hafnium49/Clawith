@@ -211,3 +211,34 @@ Alerts: shields down > 30 min (timer failed), policy-compile errors, sandbox lif
 | NemoClaw reference (read-only) | HEAD @ d9aced49 | local clone |
 
 Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 golden tests, drain sandboxes, rebuild, rehydrate.
+
+## Execution log — 2026-04-24
+
+### Phase 0 — merged
+
+Phase 0 landed on `feat/openshell-hardening-2026-04-23` as squash commit `6350028c` via PR #2 (`hafnium49/Clawith#2`). Payload (+138/−2 across 5 files):
+
+- ✅ `.github/workflows/pr.yaml` — PR CI entrypoint (ruff + pytest) with `permissions: contents: read`, `concurrency` cancel-in-progress, and pip cache. Initial bootstrap scope: `ruff check tests/conftest.py tests/test_auth.py` and `pytest -q tests/test_auth.py`.
+- ✅ `backend/tests/conftest.py` — shared detached fixtures (`tenant_fixture`, `identity_fixture`, `user_fixture`, `agent_fixture`) using `hash_password("test-password")` and randomized emails/usernames.
+- ✅ `backend/app/models/user.py` — removed unused `import sqlalchemy as sa` so the model is clean under the new ruff scope.
+- ✅ `backend/tests/test_auth.py` — dropped unused `result =` assignment in `test_get_me_returns_user` for ruff-F841 cleanliness.
+- ⚠️ OpenShell base-image digest pin remains blocked: the private community-registry credentials required to resolve the `sha256:<…>` value in the "Pinned dependency versions" table are not available in this environment. Track as an environment prerequisite before Phase 1 sandbox work.
+
+First CI run on the merged head passed (`backend-lint-and-tests` — success, 53s). See run [24874381987](https://github.com/hafnium49/Clawith/actions/runs/24874381987).
+
+### Scope caveats carried into Phase 0.1
+
+The Phase 0 ruff + pytest scopes are deliberately narrow to avoid blocking the bootstrap on pre-existing baseline debt. The full-suite run performed during review uncovered 15 pre-existing failures that Phase 0.1 needs to address before scope is widened:
+
+- **9× `TypeError: __init__() takes 1 positional argument but 2 were given`** — the `association_proxy("identity", "username")` on `User` lacks a `creator=` and fails when tests call `User(username=…)` / `User(email=…)` through the proxy. Fix by adding `creator=lambda u: Identity(username=u)` (and a sibling for email) in [backend/app/models/user.py](../backend/app/models/user.py), or by rewriting `make_user()` helpers in `tests/test_wecom_channel_api.py`, `tests/test_agent_delete_api.py`, and `tests/test_password_reset_and_notifications.py` to stop setting those columns via the proxy path.
+- **5× stale test expectations** in `test_password_reset_and_notifications.py` and `test_auth_provider.py` — mock Redis coroutines never awaited, URL default changed from `app.example.com` to `try.clawith.ai`, payload shape drift (`KeyError: 'user_id'`), mail-server-unconfigured guard now raises 400, Feishu `provider_user_id` fallback removed.
+- **1× signature drift** — `test_wake_agent_async_calls_trigger_daemon` expects `wake_agent_with_context(...)` without the new `a2a_session_id=None` kwarg.
+
+Once Phase 0.1 lands, widen the CI scope in [.github/workflows/pr.yaml](../.github/workflows/pr.yaml):
+
+- `ruff check tests/conftest.py tests/test_auth.py` → `ruff check tests` → `ruff check app tests`
+- `pytest -q tests/test_auth.py` → `pytest -q tests`
+
+### Redundant artifact — PR #1
+
+PR #1 (`hafnium49/Clawith#1`, branch `codex/execute-openshell-hardening-plan`) carried an earlier iteration of the same Phase 0 payload. With PR #2 merged it is fully redundant and should be closed (no squash/merge — the work is already in). Its review thread on GitHub contains additional context if needed later.
