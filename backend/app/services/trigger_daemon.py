@@ -22,7 +22,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models.trigger import AgentTrigger
 from app.models.agent import Agent
-from app.services.security.ssrf import is_private_url
+from app.services.security.ssrf import is_private_url_async
 
 TICK_INTERVAL = 15  # seconds
 DEDUP_WINDOW = 30   # seconds — same agent won't be invoked twice within this window
@@ -142,7 +142,7 @@ async def _poll_check(trigger: AgentTrigger) -> bool:
         return False
 
     # SSRF protection: block private/internal URLs
-    if is_private_url(url):
+    if await is_private_url_async(url):
         logger.warning(f"Poll blocked for trigger {trigger.name}: private/internal URL '{url}'")
         return False
 

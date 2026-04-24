@@ -230,3 +230,9 @@ Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 
 - ✅ Added reusable SSRF helper at `backend/app/services/security/ssrf.py` with fail-closed URL/scheme/DNS/IP checks.
 - ✅ Refactored `backend/app/services/trigger_daemon.py` poll path to use the shared SSRF helper instead of inline duplicate logic.
 - ✅ Added `backend/tests/test_ssrf.py` to validate localhost/private-IP blocking and public-host allow behavior with deterministic DNS monkeypatching.
+
+## Execution log — 2026-04-24 (Phase 1 SSRF review follow-up)
+
+- ✅ Added an async DNS resolution path (`is_private_url_async`) and switched trigger polling to use it so DNS lookups no longer block the trigger daemon event loop.
+- ✅ Clarified module-level caveat that DNS validation is first-line protection and transport-level pinned-IP enforcement is still required to fully mitigate DNS rebinding TOCTOU.
+- ✅ Expanded SSRF tests to cover non-HTTP scheme branch, DNS failure fail-closed behavior, mixed public/private multi-answer DNS, IPv6 loopback URL, malformed hostname-less URLs, and async resolver behavior.
