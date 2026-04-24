@@ -242,3 +242,23 @@ Once Phase 0.1 lands, widen the CI scope in [.github/workflows/pr.yaml](../.gith
 ### Redundant artifact — PR #1
 
 PR #1 (`hafnium49/Clawith#1`, branch `codex/execute-openshell-hardening-plan`) carried an earlier iteration of the same Phase 0 payload. With PR #2 merged it is fully redundant and should be closed (no squash/merge — the work is already in). Its review thread on GitHub contains additional context if needed later.
+
+### Phase 1 (partial) — SSRF helper merged
+
+PR #3 (`hafnium49/Clawith#3`, branch `codex/execute-hardening-plan-for-openshell`) squash-merged to `feat/openshell-hardening-2026-04-23` as commit `d2812a60` on 2026-04-24T07:25:03Z. Payload (+159/−38 across 5 files):
+
+- ✅ [backend/app/services/security/ssrf.py](../backend/app/services/security/ssrf.py) — new `is_private_url` (sync) and `is_private_url_async` with fail-closed scheme/hostname/DNS/IP checks. Shared internal helpers `_should_block_parsed_url` and `_contains_blocked_address` dedupe sync/async paths.
+- ✅ [backend/app/services/trigger_daemon.py](../backend/app/services/trigger_daemon.py) — poll path now `await`s `is_private_url_async(url)`, replacing the inline `_is_private_url` helper. Uses `asyncio.get_running_loop().getaddrinfo(...)` so DNS lookups no longer block the trigger daemon event loop.
+- ✅ [backend/tests/test_ssrf.py](../backend/tests/test_ssrf.py) — 8 tests: localhost, non-HTTP scheme (via `ftp://`), public IP, private IP, DNS failure fail-closed, mixed multi-answer DNS, IPv6 loopback `http://[::1]/`, hostname-less URL, and async-resolver wiring.
+- ✅ Incidental ruff cleanups in `trigger_daemon.py` bundled alongside the SSRF refactor: deduped redundant `from app.models.user import User` inner import, removed unused `build_agent_context` and `time as _time` imports, and replaced `is_enabled == True` with truthy form (safe because [backend/app/models/trigger.py:35](../backend/app/models/trigger.py#L35) declares `Mapped[bool]` + `Boolean`).
+- ✅ Module docstring explicitly marks the helper as a **first-line guard** and calls out that DNS rebinding (TOCTOU) still requires transport-layer IP pinning to fully mitigate.
+
+First two CI runs on the PR both green (pre-follow-up: [24875215589](https://github.com/hafnium49/Clawith/actions/runs/24875215589) in 52s; post-follow-up: [24876748159](https://github.com/hafnium49/Clawith/actions/runs/24876748159) in 40s).
+
+### Phase 1.x follow-ups (tracked, not yet filed)
+
+The SSRF docstring caveat is a stand-in for a real fix. Before closing Phase 1:
+
+- **Transport-layer IP pinning.** The current validator resolves DNS, returns OK, and the caller re-resolves at `httpx`/`aiohttp` connection time — DNS rebinding can hand back a private IP on the second lookup. Resolve once via `is_private_url_async`, pass the resolved IP(s) into a custom transport that connects by IP and sets the `Host` header from the original hostname. Applies wherever outbound URL fetches land (minimum: trigger polling; likely also any future webhook tool, link previewer, or OAuth redirect validator).
+- **Phase 0.1 (carried forward from the Phase 0 exec log above).** The 15 pre-existing test failures still block widening the CI pytest scope beyond `tests/test_auth.py`. Highest leverage item is the `User.association_proxy("identity", ...)` `creator=` fix, which collapses 9 of the 15 failures in one edit.
+- **Widen CI scopes** (from the Phase 0 exec log): `ruff check tests/conftest.py tests/test_auth.py` → `ruff check tests` → `ruff check app tests`; `pytest -q tests/test_auth.py` → `pytest -q tests`. Blocked on Phase 0.1.
