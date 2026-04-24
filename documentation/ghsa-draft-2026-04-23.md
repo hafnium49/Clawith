@@ -12,7 +12,7 @@ Accelerated coordinated-disclosure draft for the four High-severity vulnerabilit
 | Patched versions | *(leave empty — maintainer fills at release)* |
 | Severity | **High** (CVSS 8.8 for Vuln 1; 8.1 for Vuln 2; 7.5 for Vuln 3; 7.5 for Vuln 4) |
 | CWEs | `CWE-78`, `CWE-22`, `CWE-79`, `CWE-639` |
-| Credits | per Mitsui Kinzoku clearance decision — default: *"Mitsui Kinzoku CSIRT (technical contact: Hiroki Fujiwara)"* |
+| Credits | per reporter's organizational clearance — default: route via CSIRT / security team as reporter, technical contact as named individual |
 | Requested disclosure window | **14 days** from maintainer acknowledgment |
 
 ---
@@ -121,7 +121,7 @@ Expected: `10 passed`.
 
 ## Filing command
 
-After Mitsui Kinzoku clearance, and once the four patches are exported:
+After organizational clearance, and once the four patches are exported:
 
 ```bash
 # Export the four patches from the fix branch
