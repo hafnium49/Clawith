@@ -224,3 +224,9 @@ Treat OpenShell upgrades as explicit migration events: bump pin, re-run Phase 1 
 - ✅ Scoped initial `ruff` execution to `tests/conftest.py` and `tests/test_auth.py` to avoid unrelated baseline lint debt blocking Phase 0 bootstrap.
 - ✅ Scoped initial `pytest` execution to `tests/test_auth.py` for the same bootstrap purpose while broader suite hardening remains in later phases.
 - ✅ Updated `backend/tests/conftest.py` to randomize `Identity.email`, use `hash_password("test-password")`, and document that fixtures return detached objects that must be explicitly persisted by tests.
+
+## Execution log — 2026-04-24 (Phase 1 progress)
+
+- ✅ Added reusable SSRF helper at `backend/app/services/security/ssrf.py` with fail-closed URL/scheme/DNS/IP checks.
+- ✅ Refactored `backend/app/services/trigger_daemon.py` poll path to use the shared SSRF helper instead of inline duplicate logic.
+- ✅ Added `backend/tests/test_ssrf.py` to validate localhost/private-IP blocking and public-host allow behavior with deterministic DNS monkeypatching.
