@@ -35,3 +35,6 @@ docs/
 
 # Local Claude Code project instructions (never commit — contains private attribution rules)
 CLAUDE.md
+
+# Local scratch / disclosure-draft artifacts (never commit)
+tmp/
